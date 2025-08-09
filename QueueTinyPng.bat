@@ -4,7 +4,7 @@ set start=%time%
 
 REM Default configuration
 set "maxColors=256"
-set "ditherMode=6"
+set "ditherMode=5"
 set "ditherName=sierra3"
 set "paletteMode=full"
 set "enableTransparency=1"

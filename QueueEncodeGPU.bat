@@ -2,8 +2,21 @@
 setlocal enabledelayedexpansion
 set start=%time%
 
+:: ===== GPU VIDEO ENCODER =====
+:: Enhanced batch script for GPU-accelerated video encoding
+:: 
+:: Features:
+:: - Two-pass H.264 encoding (HEVC first pass for better quality/size ratio)
+:: - FPS control with default 60fps
+:: - Support for NVIDIA, AMD, and Intel GPUs
+:: - Hardware acceleration for improved performance
+:: - Batch processing of multiple video formats
+:: 
+:: Compatible with FFmpeg 7.1 and uses optimized encoding pipelines
+
 :: ===== INITIALIZATION =====
-echo GPU Video Encoder - Supports NVIDIA, AMD, and Intel GPUs
+echo GPU Video Encoder - Enhanced with Two-Pass H.264 and FPS Control
+echo Supports NVIDIA, AMD, and Intel GPUs
 echo.
 
 :: Check FFmpeg availability
@@ -22,7 +35,7 @@ if not exist "Output\" mkdir "Output"
 
 :: ===== ENCODER SELECTION =====
 echo =========================================
-echo "(1/4) Select GPU Encoder"
+echo "(1/5) Select GPU Encoder"
 echo =========================================
 echo "[1] NVIDIA - h264_nvenc (Best compatibility)"
 echo "[2] NVIDIA - hevc_nvenc (Best compression)"
@@ -37,7 +50,7 @@ set "encoderChoice=%ERRORLEVEL%"
 :: ===== AUDIO SETTINGS =====
 echo.
 echo =========================================
-echo "(2/4) Audio Settings"
+echo "(2/5) Audio Settings"
 echo =========================================
 echo "[1] Include audio (AAC 128kbps)"
 echo "[2] No audio"
@@ -48,7 +61,7 @@ set "audioChoice=%ERRORLEVEL%"
 :: ===== QUALITY SETTINGS =====
 echo.
 echo =========================================
-echo "(3/4) Video Quality"
+echo "(3/5) Video Quality"
 echo =========================================
 echo "CQ/CRF value (0-51): Lower = Higher quality"
 echo "Recommended: 18-23 (high), 24-28 (medium), 29-36 (low)"
@@ -63,10 +76,28 @@ if %ERRORLEVEL% neq 0 (
     set "qualityValue=23"
 )
 
+:: ===== FPS SETTINGS =====
+echo.
+echo =========================================
+echo "(4/5) Frame Rate (FPS)"
+echo =========================================
+echo "Target frame rate: Higher = Smoother motion"
+echo "Common values: 24, 30, 60, 120"
+echo =========================================
+set /p fpsValue="Enter FPS value (default 60): "
+
+:: Validate FPS input
+if "%fpsValue%"=="" set "fpsValue=60"
+echo %fpsValue%| findstr /r "^[0-9][0-9]*$" >nul
+if %ERRORLEVEL% neq 0 (
+    echo Invalid input. Using default: 60
+    set "fpsValue=60"
+)
+
 :: ===== SCALING SETTINGS =====
 echo.
 echo =========================================
-echo "(4/4) Video Scaling"
+echo "(5/5) Video Scaling"
 echo =========================================
 echo "Scaling percentage (50-200)"
 echo "100 = Original size, 50 = Half size, 200 = Double size"
@@ -88,34 +119,52 @@ if %ERRORLEVEL% neq 0 (
 
 :: Set encoder and codec based on choice
 if "%encoderChoice%"=="1" (
-    set "encoderParam=-c:v h264_nvenc -preset slow -profile:v main -cq %qualityValue%"
-    set "encoderName=NVIDIA H.264"
+    :: NVIDIA H.264 - Two-pass with HEVC first
+    set "firstPassEncoder=-c:v hevc_nvenc -preset slow -profile:v main -cq %qualityValue%"
+    set "finalEncoder=-c:v h264_nvenc -preset slow -profile:v main -cq %qualityValue%"
+    set "encoderName=NVIDIA H.264 (HEVC First Pass)"
     set "hwaccel=cuda"
+    set "hwOutput=cuda"
+    set "twoPassH264=1"
 )
 if "%encoderChoice%"=="2" (
     set "encoderParam=-c:v hevc_nvenc -preset slow -profile:v main -cq %qualityValue%"
     set "encoderName=NVIDIA H.265/HEVC"
     set "hwaccel=cuda"
+    set "hwOutput=cuda"
+    set "twoPassH264=0"
 )
 if "%encoderChoice%"=="3" (
-    set "encoderParam=-c:v h264_amf -preset quality -profile:v main -quality quality -qp %qualityValue%"
-    set "encoderName=AMD H.264"
+    :: AMD H.264 - Two-pass with HEVC first
+    set "firstPassEncoder=-c:v hevc_amf -preset quality -profile:v main -quality quality -qp %qualityValue%"
+    set "finalEncoder=-c:v h264_amf -preset quality -profile:v main -quality quality -qp %qualityValue%"
+    set "encoderName=AMD H.264 (HEVC First Pass)"
     set "hwaccel=d3d11va"
+    set "hwOutput=d3d11"
+    set "twoPassH264=1"
 )
 if "%encoderChoice%"=="4" (
     set "encoderParam=-c:v hevc_amf -preset quality -profile:v main -quality quality -qp %qualityValue%"
     set "encoderName=AMD H.265/HEVC"
     set "hwaccel=d3d11va"
+    set "hwOutput=d3d11"
+    set "twoPassH264=0"
 )
 if "%encoderChoice%"=="5" (
-    set "encoderParam=-c:v h264_qsv -preset veryslow -profile:v main -global_quality %qualityValue%"
-    set "encoderName=Intel H.264"
+    :: Intel H.264 - Two-pass with HEVC first
+    set "firstPassEncoder=-c:v hevc_qsv -preset veryslow -profile:v main -global_quality %qualityValue%"
+    set "finalEncoder=-c:v h264_qsv -preset veryslow -profile:v main -global_quality %qualityValue%"
+    set "encoderName=Intel H.264 (HEVC First Pass)"
     set "hwaccel=qsv"
+    set "hwOutput=qsv"
+    set "twoPassH264=1"
 )
 if "%encoderChoice%"=="6" (
     set "encoderParam=-c:v hevc_qsv -preset veryslow -profile:v main -global_quality %qualityValue%"
     set "encoderName=Intel H.265/HEVC"
     set "hwaccel=qsv"
+    set "hwOutput=qsv"
+    set "twoPassH264=0"
 )
 
 :: Audio parameters
@@ -127,11 +176,11 @@ if "%audioChoice%"=="1" (
 
 :: Hardware acceleration and output format
 if "%scaleValue%"=="100" (
-    :: No scaling - use hwaccel_output_format for better performance
+    :: No scaling - use hwaccel_output_format for better performance with FPS filter
     set "scaleFilter="
-    set "hwaccelParams=-hwaccel %hwaccel% -hwaccel_output_format %hwaccel%"
+    set "hwaccelParams=-hwaccel %hwaccel% -hwaccel_output_format %hwOutput%"
 ) else (
-    :: Scaling - keep surface in system memory
+    :: Scaling - keep surface in system memory and combine with FPS
     set "scaleFilter=-vf scale=w=iw*%scaleValue%/100:h=ih*%scaleValue%/100:flags=lanczos"
     set "hwaccelParams=-hwaccel %hwaccel%"
 )
@@ -148,6 +197,7 @@ echo =========================================
 echo Encoder: %encoderName%
 echo Audio: %audioChoice% ^(1=Yes, 2=No^)
 echo Quality: %qualityValue%
+echo FPS: %fpsValue%
 echo Scale: %scaleValue%%%
 echo =========================================
 echo Starting encoding...
@@ -177,8 +227,33 @@ for /r "Input" %%F in (*.mp4 *.avi *.mkv *.mov *.wmv *.webm *.flv *.m4v *.ts *.m
         echo Processing: !relativePath!%%~nxF
     )
     
-    :: Execute encoding command
-    ffmpeg %baseParams% %hwaccelParams% -i "%%F" %scaleFilter% %encoderParam% %audioParams% %outputParams% -y "!outputFile!"
+    :: Check if two-pass H.264 encoding is needed
+    if "!twoPassH264!"=="1" (
+        :: Two-pass encoding: HEVC first, then H.264
+        echo   Pass 1/2: HEVC encoding...
+        
+        :: Set temporary HEVC output file
+        set "tempHevcFile=!outputDir!!fileName!_temp_hevc.mp4"
+        
+        :: First pass: Encode to HEVC
+        ffmpeg %baseParams% %hwaccelParams% -i "%%F" %scaleFilter% !firstPassEncoder! -r %fpsValue% %audioParams% %outputParams% -y "!tempHevcFile!"
+
+        if !ERRORLEVEL! equ 0 (
+            echo   Pass 2/2: H.264 encoding from HEVC...
+            
+            :: Second pass: Re-encode HEVC to H.264
+            ffmpeg %baseParams% %hwaccelParams% -i "!tempHevcFile!" !finalEncoder! %audioParams% %outputParams% -y "!outputFile!"
+            
+            :: Clean up temporary HEVC file
+            del "!tempHevcFile!" 2>nul
+        ) else (
+            echo   Error in HEVC encoding, skipping H.264 pass
+            del "!tempHevcFile!" 2>nul
+        )
+    ) else (
+        :: Single-pass encoding (HEVC only)
+        ffmpeg %baseParams% %hwaccelParams% -i "%%F" %scaleFilter% %encoderParam% -r %fpsValue% %audioParams% %outputParams% -y "!outputFile!"
+    )
 
     :: Clean up temporary files
     del "ffmpeg2pass-0.log" 2>nul

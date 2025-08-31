@@ -6,16 +6,15 @@ set start=%time%
 :: Enhanced batch script for GPU-accelerated video encoding
 :: 
 :: Features:
-:: - Two-pass H.264 encoding (HEVC first pass for better quality/size ratio)
-:: - FPS control with default 60fps
+:: - Two-process H.264 encoding (HEVC first process for better quality/size ratio)
+:: - Purely for archival purposes
 :: - Support for NVIDIA, AMD, and Intel GPUs
-:: - Hardware acceleration for improved performance
-:: - Batch processing of multiple video formats
+:: - Batch processing of multiple files in subdirectories, output to corresponding subdirectories
 :: 
 :: Compatible with FFmpeg 7.1 and uses optimized encoding pipelines
 
 :: ===== INITIALIZATION =====
-echo GPU Video Encoder - Enhanced with Two-Pass H.264 and FPS Control
+echo HEVC or Two-Process H.264 GPU encoder
 echo Supports NVIDIA, AMD, and Intel GPUs
 echo.
 
@@ -119,48 +118,45 @@ if %ERRORLEVEL% neq 0 (
 
 :: Set encoder and codec based on choice
 if "%encoderChoice%"=="1" (
-    :: NVIDIA H.264 - Two-pass with HEVC first
-    set "firstPassEncoder=-c:v hevc_nvenc -preset slow -profile:v main -cq %qualityValue%"
-    set "finalEncoder=-c:v h264_nvenc -preset slow -profile:v main -cq %qualityValue%"
-    set "encoderName=NVIDIA H.264 (HEVC First Pass)"
+    set "firstPassEncoder=-c:v hevc_nvenc -preset slow -profile:v main -tune uhq -cq %qualityValue%"
+    set "finalEncoder=-c:v h264_nvenc -preset slow -profile:v main -tune hq -cq %qualityValue%"
+    set "encoderName=NVIDIA H.264 (HEVC First Process)"
     set "hwaccel=cuda"
     set "hwOutput=cuda"
     set "twoPassH264=1"
 )
 if "%encoderChoice%"=="2" (
-    set "encoderParam=-c:v hevc_nvenc -preset slow -profile:v main -cq %qualityValue%"
+    set "encoderParam=-c:v hevc_nvenc -preset slow -profile:v main -tune uhq -cq %qualityValue%"
     set "encoderName=NVIDIA H.265/HEVC"
     set "hwaccel=cuda"
     set "hwOutput=cuda"
     set "twoPassH264=0"
 )
 if "%encoderChoice%"=="3" (
-    :: AMD H.264 - Two-pass with HEVC first
-    set "firstPassEncoder=-c:v hevc_amf -preset quality -profile:v main -quality quality -qp %qualityValue%"
-    set "finalEncoder=-c:v h264_amf -preset quality -profile:v main -quality quality -qp %qualityValue%"
-    set "encoderName=AMD H.264 (HEVC First Pass)"
+    set "firstPassEncoder=-c:v hevc_amf -preset quality -profile:v main -quality quality -usage high_quality -qp %qualityValue%"
+    set "finalEncoder=-c:v h264_amf -preset quality -profile:v main -quality quality -usage high_quality -qp %qualityValue%"
+    set "encoderName=AMD H.264 (HEVC First Process)"
     set "hwaccel=d3d11va"
     set "hwOutput=d3d11"
     set "twoPassH264=1"
 )
 if "%encoderChoice%"=="4" (
-    set "encoderParam=-c:v hevc_amf -preset quality -profile:v main -quality quality -qp %qualityValue%"
+    set "encoderParam=-c:v hevc_amf -preset quality -profile:v main -quality quality -usage high_quality -qp %qualityValue%"
     set "encoderName=AMD H.265/HEVC"
     set "hwaccel=d3d11va"
     set "hwOutput=d3d11"
     set "twoPassH264=0"
 )
 if "%encoderChoice%"=="5" (
-    :: Intel H.264 - Two-pass with HEVC first
-    set "firstPassEncoder=-c:v hevc_qsv -preset veryslow -profile:v main -global_quality %qualityValue%"
-    set "finalEncoder=-c:v h264_qsv -preset veryslow -profile:v main -global_quality %qualityValue%"
-    set "encoderName=Intel H.264 (HEVC First Pass)"
+    set "firstPassEncoder=-c:v hevc_qsv -preset veryslow -profile:v main -tier main -global_quality %qualityValue%"
+    set "finalEncoder=-c:v h264_qsv -preset veryslow -profile:v main -tier main -global_quality %qualityValue%"
+    set "encoderName=Intel H.264 (HEVC First Process)"
     set "hwaccel=qsv"
     set "hwOutput=qsv"
     set "twoPassH264=1"
 )
 if "%encoderChoice%"=="6" (
-    set "encoderParam=-c:v hevc_qsv -preset veryslow -profile:v main -global_quality %qualityValue%"
+    set "encoderParam=-c:v hevc_qsv -preset veryslow -profile:v main -tier main -global_quality %qualityValue%"
     set "encoderName=Intel H.265/HEVC"
     set "hwaccel=qsv"
     set "hwOutput=qsv"
@@ -226,32 +222,32 @@ for /r "Input" %%F in (*.mp4 *.avi *.mkv *.mov *.wmv *.webm *.flv *.m4v *.ts *.m
     ) else (
         echo Processing: !relativePath!%%~nxF
     )
-    
-    :: Check if two-pass H.264 encoding is needed
+
+    :: Check if two-process H.264 encoding is needed
     if "!twoPassH264!"=="1" (
-        :: Two-pass encoding: HEVC first, then H.264
-        echo   Pass 1/2: HEVC encoding...
+        :: Two-process encoding: HEVC first, then H.264
+        echo   Process 1/2: HEVC encoding...
         
         :: Set temporary HEVC output file
         set "tempHevcFile=!outputDir!!fileName!_temp_hevc.mp4"
         
-        :: First pass: Encode to HEVC
+        :: First process: Encode to HEVC
         ffmpeg %baseParams% %hwaccelParams% -i "%%F" %scaleFilter% !firstPassEncoder! -r %fpsValue% %audioParams% %outputParams% -y "!tempHevcFile!"
 
         if !ERRORLEVEL! equ 0 (
-            echo   Pass 2/2: H.264 encoding from HEVC...
-            
-            :: Second pass: Re-encode HEVC to H.264
+            echo   Process 2/2: H.264 encoding from HEVC...
+
+            :: Second process: Re-encode HEVC to H.264
             ffmpeg %baseParams% %hwaccelParams% -i "!tempHevcFile!" !finalEncoder! %audioParams% %outputParams% -y "!outputFile!"
             
             :: Clean up temporary HEVC file
             del "!tempHevcFile!" 2>nul
         ) else (
-            echo   Error in HEVC encoding, skipping H.264 pass
+            echo   Error in HEVC encoding, skipping H.264 process
             del "!tempHevcFile!" 2>nul
         )
     ) else (
-        :: Single-pass encoding (HEVC only)
+        :: Single-process encoding (HEVC only)
         ffmpeg %baseParams% %hwaccelParams% -i "%%F" %scaleFilter% %encoderParam% -r %fpsValue% %audioParams% %outputParams% -y "!outputFile!"
     )
 
